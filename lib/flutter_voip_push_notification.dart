@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:intl/intl.dart';
 
 /// Message handler for incoming notification
 ///
@@ -9,8 +10,7 @@ import 'package:flutter/widgets.dart';
 /// or false if its a remote voip push notification
 /// [message] contains the notification payload see link below for how to parse this data
 /// https://developer.apple.com/library/archive/documentation/NetworkingInternet/Conceptual/RemoteNotificationsPG/CreatingtheNotificationPayload.html#//apple_ref/doc/uid/TP40008194-CH10-SW1
-typedef Future<dynamic> MessageHandler(
-    bool isLocal, Map<String, dynamic> notification);
+typedef Future<dynamic> MessageHandler(bool isLocal, Map<String, dynamic> notification);
 
 class NotificationSettings {
   const NotificationSettings({
@@ -80,21 +80,23 @@ class FlutterVoipPushNotification {
   factory FlutterVoipPushNotification() => _instance;
 
   @visibleForTesting
-  FlutterVoipPushNotification.private(MethodChannel channel)
-      : _channel = channel;
+  FlutterVoipPushNotification.private(MethodChannel channel) : _channel = channel {
+    print('[FlutterVoipPushNotificationPlugin] constructor on Dart side ${getFormmatedTime()}');
+  }
 
   static final FlutterVoipPushNotification _instance =
-      FlutterVoipPushNotification.private(
-          const MethodChannel('com.peerwaya/flutter_voip_push_notification'));
+      FlutterVoipPushNotification.private(const MethodChannel('com.peerwaya/flutter_voip_push_notification'));
+
+  static const _messageChannelName = 'flutter.ingenio.com/on_message';
+  static const _resumeChannelName = 'flutter.ingenio.com/on_resume';
+
+  static final _messageChannelStream = const EventChannel(_messageChannelName).receiveBroadcastStream();
+  static final _resumeChannelStream = const EventChannel(_resumeChannelName).receiveBroadcastStream();
 
   final MethodChannel _channel;
   late String _token;
-  late MessageHandler _onMessage;
-  late MessageHandler _onResume;
 
-
-  final StreamController<String> _tokenStreamController =
-      StreamController<String>.broadcast();
+  final StreamController<String> _tokenStreamController = StreamController<String>.broadcast();
 
   /// Fires when a new device token is generated.
   Stream<String> get onTokenRefresh {
@@ -102,12 +104,8 @@ class FlutterVoipPushNotification {
   }
 
   /// Sets up [MessageHandler] for incoming messages.
-  void configure({
-    required MessageHandler onMessage,
-    required MessageHandler onResume,
-  }) {
-    _onMessage = onMessage;
-    _onResume = onResume;
+  void configure() {
+    print('[FlutterVoipPushNotificationPlugin] configure on Dart side ${getFormmatedTime()}');
     _channel.setMethodCallHandler(_handleMethod);
     _channel.invokeMethod<void>('configure');
   }
@@ -119,15 +117,22 @@ class FlutterVoipPushNotification {
         _token = map["deviceToken"];
         _tokenStreamController.add(_token);
         return null;
-      case "onMessage":
-        return _onMessage(
-            map["local"], map["notification"].cast<String, dynamic>());
-      case "onResume":
-        return _onResume(
-            map["local"], map["notification"].cast<String, dynamic>());
       default:
         throw UnsupportedError("Unrecognized JSON message");
     }
+  }
+
+  Stream<Map<String, dynamic>> get onMessageReceived {
+    return _messageChannelStream.map((dynamic event) => _parseEvent(event));
+  }
+
+  Stream<Map<String, dynamic>> get onResumeReceived {
+    return _resumeChannelStream.map((dynamic event) => _parseEvent(event));
+  }
+
+  Map<String, dynamic> _parseEvent(Map message) {
+    print('[FlutterVoipPushNotificationPlugin] _parseEvent on Dart side ${getFormmatedTime()}');
+    return message.cast<String, dynamic>();
   }
 
   /// Returns the locally cached push token
@@ -135,18 +140,20 @@ class FlutterVoipPushNotification {
     return await _channel.invokeMethod<String>('getToken');
   }
 
+  String getFormmatedTime() {
+    DateTime now = DateTime.now();
+    final DateFormat formatter = DateFormat('HH:mm:ss.SSS');
+    return formatter.format(now);
+  }
+
   /// Prompts the user for notification permissions the first time
   /// it is called.
-  Future<void> requestNotificationPermissions(
-      [NotificationSettings iosSettings =
-          const NotificationSettings()]) async {
-    _channel.invokeMethod<void>(
-        'requestNotificationPermissions', iosSettings.toMap());
+  Future<void> requestNotificationPermissions([NotificationSettings iosSettings = const NotificationSettings()]) async {
+    _channel.invokeMethod<void>('requestNotificationPermissions', iosSettings.toMap());
   }
 
   /// Schedules the local [notification] for immediate presentation.
   Future<void> presentLocalNotification(LocalNotification notification) async {
-    await _channel.invokeMethod<void>(
-        'presentLocalNotification', notification.toMap());
+    await _channel.invokeMethod<void>('presentLocalNotification', notification.toMap());
   }
 }

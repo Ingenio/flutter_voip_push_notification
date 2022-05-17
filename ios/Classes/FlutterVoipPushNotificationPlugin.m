@@ -3,6 +3,8 @@
 NSString *const FlutterVoipRemoteNotificationsRegistered = @"voipRemoteNotificationsRegistered";
 NSString *const FlutterVoipLocalNotificationReceived = @"voipLocalNotificationReceived";
 NSString *const FlutterVoipRemoteNotificationReceived = @"voipRemoteNotificationReceived";
+NSString *const VOIP_MESSAGE_CHANNEL_NAME = @"flutter.ingenio.com/on_message";
+NSString *const VOIP_RESUME_CHANNEL_NAME = @"flutter.ingenio.com/on_resume";
 
 BOOL RunningInAppExtension(void)
 {
@@ -17,11 +19,24 @@ BOOL RunningInAppExtension(void)
 
 + (void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar {
     FlutterVoipPushNotificationPlugin* instance = [[FlutterVoipPushNotificationPlugin alloc] initWithRegistrar:registrar messenger:[registrar messenger]];
+    instance.messageStreamHandler = [MessageStreamHandler new];
+    instance.resumeStreamHandler = [ResumeStreamHandler new];
+    
+    [[FlutterEventChannel eventChannelWithName:VOIP_MESSAGE_CHANNEL_NAME
+                               binaryMessenger:[registrar messenger]] setStreamHandler:instance.messageStreamHandler];
+    
+    [[FlutterEventChannel eventChannelWithName:VOIP_RESUME_CHANNEL_NAME
+                               binaryMessenger:[registrar messenger]] setStreamHandler:instance.resumeStreamHandler];
     [registrar addApplicationDelegate:instance];
+    NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
+    [dateFormatter setDateFormat:@"HH:mm:ss.SSS"];
+    NSDate *currentDate = [NSDate date];
+    NSString *currentTime = [dateFormatter stringFromDate:currentDate];
+    NSLog(@"[FlutterVoipPushNotificationPlugin] registerWithRegistrar time = %@", currentTime);
 }
 
 - (instancetype)initWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar
-                      messenger:(NSObject<FlutterBinaryMessenger>*)messenger{
+                        messenger:(NSObject<FlutterBinaryMessenger>*)messenger{
     
     self = [super init];
     
@@ -97,10 +112,10 @@ BOOL RunningInAppExtension(void)
 {
     NSUInteger types = [[UIApplication sharedApplication] currentUserNotificationSettings].types;
     return @{
-             @"alert": @((types & UIUserNotificationTypeAlert) > 0),
-             @"badge": @((types & UIUserNotificationTypeBadge) > 0),
-             @"sound": @((types & UIUserNotificationTypeSound) > 0),
-             };
+        @"alert": @((types & UIUserNotificationTypeAlert) > 0),
+        @"badge": @((types & UIUserNotificationTypeBadge) > 0),
+        @"sound": @((types & UIUserNotificationTypeSound) > 0),
+    };
 }
 
 - (void)voipRegistration
@@ -123,17 +138,17 @@ BOOL RunningInAppExtension(void)
 #pragma mark - AppDelegate
 
 - (BOOL)application:(UIApplication *)application
-    didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
-  [self voipRegistration];
-  return YES;
+didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+    [self voipRegistration];
+    return YES;
 }
 
 - (void)applicationDidEnterBackground:(UIApplication *)application {
-  _resumingFromBackground = YES;
+    _resumingFromBackground = YES;
 }
 
 - (void)applicationDidBecomeActive:(UIApplication *)application {
-  _resumingFromBackground = NO;
+    _resumingFromBackground = NO;
 }
 
 
@@ -164,12 +179,16 @@ BOOL RunningInAppExtension(void)
     [[NSNotificationCenter defaultCenter] postNotificationName:FlutterVoipRemoteNotificationsRegistered
                                                         object:self
                                                       userInfo:@{@"deviceToken" : [hexString copy]}];
-   
+    
 }
 
 + (void)didReceiveIncomingPushWithPayload:(PKPushPayload *)payload forType:(NSString *)type
 {
-    NSLog(@"[FlutterVoipPushNotificationPlugin] didReceiveIncomingPushWithPayload payload.dictionaryPayload = %@, type = %@", payload.dictionaryPayload, type);
+    NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
+    [dateFormatter setDateFormat:@"HH:mm:ss.SSS"];
+    NSDate *currentDate = [NSDate date];
+    NSString *currentTime = [dateFormatter stringFromDate:currentDate];
+    NSLog(@"[FlutterVoipPushNotificationPlugin] didReceiveIncomingPushWithPayload payload.dictionaryPayload = %@, type = %@, time = %@", payload.dictionaryPayload, type, currentTime);
     [[NSNotificationCenter defaultCenter] postNotificationName:FlutterVoipRemoteNotificationReceived
                                                         object:self
                                                       userInfo:payload.dictionaryPayload];
@@ -177,31 +196,83 @@ BOOL RunningInAppExtension(void)
 
 - (void)handleRemoteNotificationsRegistered:(NSNotification *)notification
 {
-    NSLog(@"[FlutterVoipPushNotificationPlugin] handleRemoteNotificationsRegistered notification.userInfo = %@", notification.userInfo);
+    NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
+    [dateFormatter setDateFormat:@"HH:mm:ss.SSS"];
+    NSDate *currentDate = [NSDate date];
+    NSString *currentTime = [dateFormatter stringFromDate:currentDate];
+    NSLog(@"[FlutterVoipPushNotificationPlugin] handleRemoteNotificationsRegistered notification.userInfo = %@, time = %@", notification.userInfo, currentTime);
     [_channel invokeMethod:@"onToken" arguments:notification.userInfo];
 }
 
 - (void)handleLocalNotificationReceived:(NSNotification *)notification
 {
 #ifdef DEBUG
-    NSLog(@"[FlutterVoipPushNotificationPlugin] handleLocalNotificationReceived notification.userInfo = %@",notification.userInfo);
+    NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
+    [dateFormatter setDateFormat:@"HH:mm:ss.SSS"];
+    NSDate *currentDate = [NSDate date];
+    NSString *currentTime = [dateFormatter stringFromDate:currentDate];
+    NSLog(@"[FlutterVoipPushNotificationPlugin] handleLocalNotificationReceived notification.userInfo = %@, time = %@", notification.userInfo, currentTime);
 #endif
     if (_resumingFromBackground) {
-        [_channel invokeMethod:@"onResume" arguments:@{@"local": @YES, @"notification": notification.userInfo}];
+        [self.resumeStreamHandler sendResume: notification.userInfo];
     } else {
-        [_channel invokeMethod:@"onMessage" arguments:@{@"local": @YES, @"notification": notification.userInfo}];
+        [self.messageStreamHandler sendMessage: notification.userInfo];
     }
 }
 
 - (void)handleRemoteNotificationReceived:(NSNotification *)notification
 {
 #ifdef DEBUG
-    NSLog(@"[FlutterVoipPushNotificationPlugin] handleRemoteNotificationReceived notification.userInfo = %@", notification.userInfo);
+    NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
+    [dateFormatter setDateFormat:@"HH:mm:ss.SSS"];
+    NSDate *currentDate = [NSDate date];
+    NSString *currentTime = [dateFormatter stringFromDate:currentDate];
+    NSLog(@"[FlutterVoipPushNotificationPlugin] handleRemoteNotificationReceived notification.userInfo = %@, time = %@", notification.userInfo, currentTime);
 #endif
     if (_resumingFromBackground) {
-        [_channel invokeMethod:@"onResume" arguments:@{@"local": @NO, @"notification": notification.userInfo}];
+        [self.resumeStreamHandler sendResume: notification.userInfo];
     } else {
-        [_channel invokeMethod:@"onMessage" arguments:@{@"local": @NO, @"notification": notification.userInfo}];
+        [self.messageStreamHandler sendMessage: notification.userInfo];
+    }
+}
+
+@end
+
+@implementation MessageStreamHandler
+
+- (FlutterError*)onListenWithArguments:(id)arguments eventSink:(FlutterEventSink)eventSink {
+    self.eventSink = eventSink;
+    return nil;
+}
+
+- (FlutterError*)onCancelWithArguments:(id)arguments {
+    self.eventSink = nil;
+    return nil;
+}
+
+- (void) sendMessage: (NSString *)message {
+    if(self.eventSink) {
+        self.eventSink(message);
+    }
+}
+
+@end
+
+@implementation ResumeStreamHandler
+
+- (FlutterError*)onListenWithArguments:(id)arguments eventSink:(FlutterEventSink)eventSink {
+    self.eventSink = eventSink;
+    return nil;
+}
+
+- (FlutterError*)onCancelWithArguments:(id)arguments {
+    self.eventSink = nil;
+    return nil;
+}
+
+- (void) sendResume: (NSString *)resume {
+    if(self.eventSink) {
+        self.eventSink(resume);
     }
 }
 

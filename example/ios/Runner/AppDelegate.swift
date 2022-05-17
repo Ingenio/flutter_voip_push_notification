@@ -22,7 +22,7 @@ import flutter_voip_push_notification
                       didReceiveIncomingPushWith payload: PKPushPayload,
                       for type: PKPushType,
                       completion: @escaping () -> Void){
-        
+
         // Register VoIP push token (a property of PKPushCredentials) with server
         FlutterVoipPushNotificationPlugin.didReceiveIncomingPush(with: payload, forType: type.rawValue)
     }
