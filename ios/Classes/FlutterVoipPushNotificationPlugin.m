@@ -1,9 +1,6 @@
 #import "FlutterVoipPushNotificationPlugin.h"
 
 static FlutterVoipPushNotificationPlugin *instance;
-static NSDictionary *cachedTokenPayload;
-static NSMutableArray *cachedPushArray;
-
 
 BOOL RunningInAppExtension(void)
 {
@@ -21,50 +18,7 @@ BOOL RunningInAppExtension(void)
 + (void)registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar {
     instance = [[FlutterVoipPushNotificationPlugin alloc] initWithRegistrar:registrar messenger:[registrar messenger]];
     [registrar addApplicationDelegate:instance];
-    if (cachedTokenPayload) {
-        [instance handleRemoteNotificationsRegistered: cachedTokenPayload];
-        cachedTokenPayload = nil;
-    }
-    if (cachedPushArray != nil && [cachedPushArray count] != 0) {
-        for (id value in cachedPushArray) {
-            [instance handleRemoteNotificationReceived:value];
-        }
-        [cachedPushArray removeAllObjects];
-    }
 }
-
-#pragma mark - PKPushRegistryDelegate methods
-
-+ (void)didUpdatePushCredentials:(PKPushCredentials *)credentials forType:(NSString *)type
-{
-    NSLog(@"[FlutterVoipPushNotificationPlugin] didUpdatePushCredentials credentials.token = %@, type = %@", credentials.token, type);
-    NSMutableString *hexString = [NSMutableString string];
-    NSUInteger voipTokenLength = credentials.token.length;
-    const unsigned char *bytes = credentials.token.bytes;
-    for (NSUInteger i = 0; i < voipTokenLength; i++) {
-        [hexString appendFormat:@"%02x", bytes[i]];
-    }
-    NSDictionary *tokenPayload = @{@"deviceToken" : [hexString copy]};
-    if (instance) {
-        [instance handleRemoteNotificationsRegistered: tokenPayload];
-    } else {
-        cachedTokenPayload = tokenPayload;
-    }
-}
-
-+ (void)didReceiveIncomingPushWithPayload:(PKPushPayload *)payload forType:(NSString *)type
-{
-    NSLog(@"[FlutterVoipPushNotificationPlugin] didReceiveIncomingPushWithPayload payload.dictionaryPayload = %@, type = %@", payload.dictionaryPayload, type);
-    if (instance) {
-        [instance handleRemoteNotificationReceived:payload.dictionaryPayload];
-    } else {
-        if (cachedPushArray == nil) {
-            cachedPushArray = [[NSMutableArray alloc] init];
-        }
-        [cachedPushArray addObject:payload.dictionaryPayload];
-    }
-}
-
 
 - (instancetype)initWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar
                         messenger:(NSObject<FlutterBinaryMessenger>*)messenger{
@@ -88,13 +42,13 @@ BOOL RunningInAppExtension(void)
             return;
         }
         [self registerUserNotification:call.arguments result:result];
-    }if ([@"checkPermissions" isEqualToString:method]) {
+    } else if ([@"checkPermissions" isEqualToString:method]) {
         if (RunningInAppExtension()) {
             result(@{@"alert": @NO, @"badge": @NO, @"sound": @NO});
             return;
         }
         result([self checkPermissions]);
-    } if (([@"configure" isEqualToString:method])) {
+    } else if (([@"configure" isEqualToString:method])) {
         _flutterStarted = YES;
 #ifdef DEBUG
         NSLog(@"[FlutterVoipPushNotificationPlugin] handleMethodCall pushData = %@", pushData);
@@ -106,12 +60,12 @@ BOOL RunningInAppExtension(void)
             }
             [pushData removeAllObjects];
         }
-    } if ([@"presentLocalNotification" isEqualToString:method]) {
+    } else if ([@"presentLocalNotification" isEqualToString:method]) {
         [self presentLocalNotification:call.arguments];
         result(nil);
-    }if ([@"getToken" isEqualToString:method]) {
+    } else if ([@"getToken" isEqualToString:method]) {
         result([self getToken]);
-    }else {
+    } else {
         result(FlutterMethodNotImplemented);
     }
 }
@@ -188,6 +142,27 @@ didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
         [hexString appendFormat:@"%02x", bytes[i]];
     }
     return hexString;
+}
+
+#pragma mark - PKPushRegistryDelegate methods
+
++ (void)didUpdatePushCredentials:(PKPushCredentials *)credentials forType:(NSString *)type
+{
+    NSLog(@"[FlutterVoipPushNotificationPlugin] didUpdatePushCredentials credentials.token = %@, type = %@", credentials.token, type);
+    NSMutableString *hexString = [NSMutableString string];
+    NSUInteger voipTokenLength = credentials.token.length;
+    const unsigned char *bytes = credentials.token.bytes;
+    for (NSUInteger i = 0; i < voipTokenLength; i++) {
+        [hexString appendFormat:@"%02x", bytes[i]];
+    }
+    NSDictionary *tokenPayload = @{@"deviceToken" : [hexString copy]};
+    [instance handleRemoteNotificationsRegistered: tokenPayload];
+}
+
++ (void)didReceiveIncomingPushWithPayload:(PKPushPayload *)payload forType:(NSString *)type
+{
+    NSLog(@"[FlutterVoipPushNotificationPlugin] didReceiveIncomingPushWithPayload payload.dictionaryPayload = %@, type = %@", payload.dictionaryPayload, type);
+    [instance handleRemoteNotificationReceived:payload.dictionaryPayload];
 }
 
 - (void)handleRemoteNotificationsRegistered:(NSDictionary *)token
